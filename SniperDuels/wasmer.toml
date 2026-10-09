@@ -1,17 +1,11 @@
 [package]
 name = "procoder67tuff/sniper-duels"
 version = "1.0.0"
-description = "Roblox-inspired 3D Sniper Duels Web FPS with real-time WebSocket multiplayer"
+description = "Roblox 3D Sniper Duels Web FPS with real-time multiplayer"
 license = "MIT"
+readme = "README.md"
 
-[[command]]
-name = "server"
-module = "server"
-runner = "https://webc.org/runner/node"
+[dependencies]
 
 [fs]
 "/app" = "."
-
-[env]
-NODE_ENV = "production"
-PORT = "8080"

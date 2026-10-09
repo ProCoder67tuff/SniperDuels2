@@ -1,0 +1,4 @@
+kind: wasmer.io/App.v0
+name: SniperDuels
+owner: procoder67tuff
+package: .
