@@ -1,5 +1,5 @@
 [package]
-name = "sniper-duels"
+name = "procoder67tuff/sniper-duels"
 version = "1.0.0"
 description = "Roblox-inspired 3D Sniper Duels Web FPS with real-time WebSocket multiplayer"
 license = "MIT"
