@@ -32,6 +32,13 @@ const MIME_TYPES = {
 // 1. Static HTTP Request Handler
 function requestHandler(req, res) {
   let reqPath = req.url.split('?')[0];
+
+  // Cloud Healthchecks
+  if (reqPath === '/health' || reqPath === '/healthz' || reqPath === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    return res.end('OK');
+  }
+
   if (reqPath === '/') reqPath = '/index.html';
 
   const filePath = path.join(__dirname, reqPath);
@@ -59,16 +66,12 @@ function requestHandler(req, res) {
   });
 }
 
-// 2. HTTP Server instances (binds PORT for Wasmer & local preview)
+// 2. HTTP Server instance (binds PORT for Wasmer, Docker & Cloud environments)
 const PORT = parseInt(process.env.PORT, 10) || 3000;
-const SECONDARY_PORT = parseInt(process.env.SECONDARY_PORT, 10) || 8000;
-
 const server = http.createServer(requestHandler);
-const server8000 = (PORT !== SECONDARY_PORT) ? http.createServer(requestHandler) : null;
 
 // 3. Real-Time 60Hz Authoritative WebSocket Game Server
 const wss = new WebSocketServer({ server });
-const wss8000 = server8000 ? new WebSocketServer({ server: server8000 }) : null;
 
 let clients = new Map();
 let nextPlayerId = 1;
@@ -76,7 +79,6 @@ let queuePlayers = new Set(); // Set of player IDs standing on the Middle 1v1 Qu
 let activeMatches = new Map(); // matchId -> matchData
 
 wss.on('connection', handleConnection);
-if (wss8000) wss8000.on('connection', handleConnection);
 
 function handleConnection(ws) {
   const playerId = `player_${nextPlayerId++}`;
@@ -519,11 +521,5 @@ function broadcastExcept(excludeId, msg) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`SNIPER DUELS Primary Server live on http://0.0.0.0:${PORT}`);
+  console.log(`SNIPER DUELS Server live on http://0.0.0.0:${PORT}`);
 });
-
-if (server8000) {
-  server8000.listen(SECONDARY_PORT, '0.0.0.0', () => {
-    console.log(`SNIPER DUELS Secondary Server live on http://0.0.0.0:${SECONDARY_PORT}`);
-  });
-}

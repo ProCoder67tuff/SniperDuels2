@@ -1,8 +1,5 @@
 kind: wasmer.io/App.v0
-name: sniper-duels
-package: procoder67tuff/sniper-duels
-env:
-  PORT: "8080"
-  NODE_ENV: "production"
-capabilities:
-  - insecure_http_listener: 8080
+name: SniperDuels
+owner: procoder67tuff
+package: .
+app_id: da_KE4I8tXUZyz5
