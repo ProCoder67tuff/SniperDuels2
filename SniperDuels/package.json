@@ -1,0 +1,23 @@
+{
+  "name": "sniper-duels",
+  "version": "1.0.0",
+  "description": "3D Web FPS Sniper Duels recreating Roblox gameplay with real-time WebSocket multiplayer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "fps",
+    "threejs",
+    "websocket",
+    "wasmer",
+    "roblox",
+    "game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  }
+}
