@@ -268,36 +268,97 @@ function handleClientMessage(senderId, data) {
           }));
         }
 
-        // Check for fatal elimination -> Match Ends Immediately!
+        // Check for fatal elimination -> Advance Round or End Match
         if (target.health <= 0) {
           const matchId = player.matchId;
-          console.log(`[Combat] Fatal kill! ${senderId} wins 1v1 Duel against ${data.targetId}!`);
+          const match = activeMatches.get(matchId);
 
-          if (player.ws.readyState === player.ws.OPEN) {
-            player.ws.send(JSON.stringify({
-              type: 'MATCH_OVER',
-              winnerId: senderId,
-              loserId: data.targetId,
-              isHeadshot: data.isHeadshot,
-              isWinner: true
-            }));
-          }
+          if (match) {
+            match.scores[senderId] = (match.scores[senderId] || 0) + 1;
+            const blueScore = match.scores[match.p1] || 0;
+            const redScore = match.scores[match.p2] || 0;
+            const winnerScore = match.scores[senderId];
 
-          if (target.ws.readyState === target.ws.OPEN) {
-            target.ws.send(JSON.stringify({
-              type: 'MATCH_OVER',
-              winnerId: senderId,
-              loserId: data.targetId,
-              isHeadshot: data.isHeadshot,
-              isWinner: false
-            }));
-          }
+            console.log(`[Combat] Fatal kill! ${senderId} won Round ${match.roundNumber}! Score: Blue ${blueScore} - Red ${redScore}`);
 
-          if (matchId && activeMatches.has(matchId)) {
-            activeMatches.delete(matchId);
+            // Check if player reached maxScore (e.g. 3 wins)
+            if (winnerScore >= match.maxScore) {
+              console.log(`[Match] ${senderId} won the entire duel (${winnerScore} wins)!`);
+
+              const p1Client = clients.get(match.p1);
+              const p2Client = clients.get(match.p2);
+
+              if (p1Client && p1Client.ws.readyState === p1Client.ws.OPEN) {
+                p1Client.ws.send(JSON.stringify({
+                  type: 'MATCH_OVER',
+                  winnerId: senderId,
+                  loserId: data.targetId,
+                  isHeadshot: data.isHeadshot,
+                  isWinner: (senderId === match.p1),
+                  scores: { blue: blueScore, red: redScore }
+                }));
+                p1Client.matchId = null;
+              }
+
+              if (p2Client && p2Client.ws.readyState === p2Client.ws.OPEN) {
+                p2Client.ws.send(JSON.stringify({
+                  type: 'MATCH_OVER',
+                  winnerId: senderId,
+                  loserId: data.targetId,
+                  isHeadshot: data.isHeadshot,
+                  isWinner: (senderId === match.p2),
+                  scores: { blue: blueScore, red: redScore }
+                }));
+                p2Client.matchId = null;
+              }
+
+              activeMatches.delete(matchId);
+            } else {
+              // Advance to next round!
+              match.roundNumber++;
+              player.health = 100;
+              target.health = 100;
+
+              const roundOverMsg = JSON.stringify({
+                type: 'ROUND_OVER',
+                roundWinnerId: senderId,
+                roundLoserId: data.targetId,
+                isHeadshot: data.isHeadshot,
+                scores: { blue: blueScore, red: redScore },
+                nextRoundNumber: match.roundNumber,
+                maxScore: match.maxScore,
+                intermissionSeconds: 3
+              });
+
+              const p1Client = clients.get(match.p1);
+              const p2Client = clients.get(match.p2);
+              if (p1Client && p1Client.ws.readyState === p1Client.ws.OPEN) p1Client.ws.send(roundOverMsg);
+              if (p2Client && p2Client.ws.readyState === p2Client.ws.OPEN) p2Client.ws.send(roundOverMsg);
+            }
+          } else {
+            if (player.ws.readyState === player.ws.OPEN) {
+              player.ws.send(JSON.stringify({
+                type: 'MATCH_OVER',
+                winnerId: senderId,
+                loserId: data.targetId,
+                isHeadshot: data.isHeadshot,
+                isWinner: true,
+                scores: { blue: 1, red: 0 }
+              }));
+            }
+            if (target.ws.readyState === target.ws.OPEN) {
+              target.ws.send(JSON.stringify({
+                type: 'MATCH_OVER',
+                winnerId: senderId,
+                loserId: data.targetId,
+                isHeadshot: data.isHeadshot,
+                isWinner: false,
+                scores: { blue: 1, red: 0 }
+              }));
+            }
+            player.matchId = null;
+            target.matchId = null;
           }
-          player.matchId = null;
-          target.matchId = null;
         }
       }
       break;
@@ -381,7 +442,13 @@ function checkMatchmakingQueue() {
         votes: {}, // playerId -> mapName ('blockout' | 'poolday' | 'rooftop')
         voteCounts: { blockout: 0, poolday: 0, rooftop: 0 },
         timer: 10,
-        timerInterval: null
+        timerInterval: null,
+        roundNumber: 1,
+        maxScore: 3,
+        scores: {
+          [p1Id]: 0,
+          [p2Id]: 0
+        }
       };
       activeMatches.set(matchId, matchData);
 
@@ -473,7 +540,8 @@ function resolveMapVote(match) {
     opponentTeam: 'RED',
     selectedMap: winningMap,
     votes: counts,
-    wasTie: wasTie
+    wasTie: wasTie,
+    maxScore: match.maxScore
   });
 
   const startMsg2 = JSON.stringify({
@@ -484,7 +552,8 @@ function resolveMapVote(match) {
     opponentTeam: 'BLUE',
     selectedMap: winningMap,
     votes: counts,
-    wasTie: wasTie
+    wasTie: wasTie,
+    maxScore: match.maxScore
   });
 
   if (p1 && p1.ws.readyState === p1.ws.OPEN) p1.ws.send(startMsg1);

@@ -340,7 +340,7 @@ export class MultiplayerClient {
           }
 
           // Delegate to match manager to start 2-player duel!
-          this.game.matchManager.startTwoPlayerMatch(msg.myTeam, msg.opponentId, chosenMap);
+          this.game.matchManager.startTwoPlayerMatch(msg.myTeam, msg.opponentId, chosenMap, msg.maxScore);
         }, 1200);
         break;
 
@@ -365,10 +365,21 @@ export class MultiplayerClient {
         this.game.matchManager.showDamageNumber(msg.damage, msg.isHeadshot);
         break;
 
+      case 'ROUND_OVER':
+        // Multi-round match: advance round and show intermission
+        this.game.matchManager.onTwoPlayerRoundOver(msg);
+        break;
+
       case 'MATCH_OVER':
         this.isTwoPlayerMatch = false;
         this.currentMatchId = null;
         this.currentOpponentId = null;
+
+        if (msg.scores) {
+          this.game.matchManager.scorePlayer = msg.scores.blue;
+          this.game.matchManager.scoreBot = msg.scores.red;
+          this.game.matchManager.updateHUDScore();
+        }
 
         if (msg.reason === 'OPPONENT_DISCONNECTED') {
           this.game.matchManager.triggerMatchVictory('OPPONENT_QUIT');

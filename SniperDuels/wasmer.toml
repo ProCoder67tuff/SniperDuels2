@@ -1,11 +1,9 @@
 [package]
 name = "procoder67tuff/sniper-duels"
-version = "1.0.0"
+version = "1.0.1"
 description = "Roblox 3D Sniper Duels Web FPS with real-time multiplayer"
 license = "MIT"
 readme = "README.md"
-
-[dependencies]
 
 [fs]
 "/app" = "."

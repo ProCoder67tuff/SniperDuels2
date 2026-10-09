@@ -117,6 +117,7 @@ class GameEngine {
     // 10. Real-time Multiplayer Client
     this.mpClient = new MultiplayerClient(this);
     this.matchManager.setMultiplayerClient(this.mpClient);
+    this.matchManager.setWeaponSystem(this.weaponSystem);
 
     // Wire input events & combat
     this.setupEvents();

@@ -1,4 +1,4 @@
-// MatchManager.js - State Machine, Matchmaking Duel Pads, Round Engine, Single-Duel Finish
+// MatchManager.js - State Machine, Matchmaking Duel Pads, Multi-Round Engine
 import * as THREE from '../vendor/three/three.module.js';
 
 export class MatchManager {
@@ -9,14 +9,17 @@ export class MatchManager {
     this.audio = audio;
     this.particles = particles;
     this.caseSystem = caseSystem;
+    this.weaponSystem = null;
 
-    // Match Rules: Single Duel Win Ends The Game!
-    this.maxScore = 1;
-    this.scorePlayer = 0;
-    this.scoreBot = 0;
+    // Multi-Round Rules: First to 3 Wins!
+    this.maxScore = 3;
+    this.scorePlayer = 0; // Blue Score
+    this.scoreBot = 0;    // Red Score
     this.roundNumber = 1;
+    this.nextRoundNumber = 1;
+    this.lastRoundWinner = null;
 
-    // States: 'LOBBY', 'WARMUP', 'ROUND_ACTIVE', 'MATCH_VICTORY'
+    // States: 'LOBBY', 'WARMUP', 'ROUND_ACTIVE', 'ROUND_INTERMISSION', 'MATCH_VICTORY'
     this.state = 'LOBBY';
     this.stateTimer = 0;
     this.roundTimeRemaining = 60;
@@ -40,6 +43,10 @@ export class MatchManager {
 
   setMultiplayerClient(mpClient) {
     this.mpClient = mpClient;
+  }
+
+  setWeaponSystem(weaponSystem) {
+    this.weaponSystem = weaponSystem;
   }
 
   initUI() {
@@ -150,9 +157,10 @@ export class MatchManager {
     }
   }
 
-  // Starts Solo Bot Match
+  // Starts Solo Bot Match (First to 3 Wins)
   startSoloMatch() {
     this.isTwoPlayer = false;
+    this.maxScore = 3;
     this.scorePlayer = 0;
     this.scoreBot = 0;
     this.roundNumber = 1;
@@ -161,10 +169,11 @@ export class MatchManager {
   }
 
   // Starts 2-Player Match triggered by WebSocket Server!
-  startTwoPlayerMatch(myTeam, opponentId, chosenMap = 'blockout') {
+  startTwoPlayerMatch(myTeam, opponentId, chosenMap = 'blockout', maxScore = 3) {
     this.isTwoPlayer = true;
     this.opponentId = opponentId;
     this.myTeam = myTeam;
+    this.maxScore = maxScore || 3;
     this.scorePlayer = 0;
     this.scoreBot = 0;
     this.roundNumber = 1;
@@ -174,6 +183,11 @@ export class MatchManager {
     this.bot.mesh.visible = false;
     this.bot.isAlive = false;
 
+    this.setupNextTwoPlayerRound(1);
+  }
+
+  // Sets up next 2-Player round: resets player, teleports to spawn perch, raises barriers
+  setupNextTwoPlayerRound(roundNum) {
     this.state = 'WARMUP';
     this.stateTimer = 3.0;
     this.roundTimeRemaining = 60;
@@ -181,21 +195,38 @@ export class MatchManager {
     this.isPlayerAlive = true;
     this.updateHUDHealth();
 
+    if (roundNum !== undefined) {
+      this.roundNumber = roundNum;
+    }
+
     // Teleport local player to team perch
-    if (myTeam === 'BLUE') {
+    if (this.myTeam === 'BLUE') {
       this.controls.teleport(this.map.spawnBlue, new THREE.Vector3(0, 1.8, 0));
     } else {
       this.controls.teleport(this.map.spawnOrange, new THREE.Vector3(0, 1.8, 0));
     }
 
-    // Raise forcefield barrier
+    // Reset weapons ammo & ADS
+    if (this.weaponSystem) {
+      this.weaponSystem.ammo = 5;
+      this.weaponSystem.isReloading = false;
+      this.weaponSystem.isBolting = false;
+      this.weaponSystem.setADS(false);
+    }
+
+    // Clear damage vignette
+    const vig = document.getElementById('damage-vignette');
+    if (vig) vig.style.opacity = '0.0';
+
+    // Raise spawn barrier forcefields
     this.map.blueBarrier.visible = true;
     this.map.orangeBarrier.visible = true;
 
     this.audio.playCountdownTick();
-    this.updateStateBanner(`1v1 DUEL [${chosenMap.toUpperCase()}] - WARMUP (3)`, true, '#00d2ff');
+    this.updateStateBanner(`ROUND ${this.roundNumber} - WARMUP (3)`, true, '#00d2ff');
   }
 
+  // Sets up round for Solo Bot match
   setupRound() {
     this.state = 'WARMUP';
     this.stateTimer = 3.0;
@@ -203,6 +234,18 @@ export class MatchManager {
     this.playerHealth = 100;
     this.isPlayerAlive = true;
     this.updateHUDHealth();
+
+    // Reset weapons ammo & ADS
+    if (this.weaponSystem) {
+      this.weaponSystem.ammo = 5;
+      this.weaponSystem.isReloading = false;
+      this.weaponSystem.isBolting = false;
+      this.weaponSystem.setADS(false);
+    }
+
+    // Clear damage vignette
+    const vig = document.getElementById('damage-vignette');
+    if (vig) vig.style.opacity = '0.0';
 
     // Teleport Player to Blue Spawn, facing North (Orange side)
     this.controls.teleport(this.map.spawnBlue, new THREE.Vector3(0, 1.8, 0));
@@ -247,15 +290,20 @@ export class MatchManager {
     }
   }
 
-  // When Bot dies: Player wins, game ends immediately!
+  // When Bot dies: Player wins the round
   onBotKilled(isHeadshot) {
     this.addKillFeedEntry('YOU', 'BOT_ALPHA', isHeadshot);
-    this.scorePlayer = 1;
+    this.scorePlayer++;
     this.updateHUDScore();
     this.audio.playRoundWon();
 
-    // Immediate game end!
-    this.triggerMatchVictory('PLAYER');
+    if (this.scorePlayer >= this.maxScore) {
+      this.triggerMatchVictory('PLAYER');
+    } else {
+      this.lastRoundWinner = 'YOU';
+      this.state = 'ROUND_INTERMISSION';
+      this.stateTimer = 3.0;
+    }
   }
 
   // When Player takes damage (from Bot or Remote Player)
@@ -274,25 +322,69 @@ export class MatchManager {
     }
   }
 
-  // When Player dies: Opponent wins, game ends immediately!
+  // When Player dies: Opponent wins the round
   onPlayerKilled(isHeadshot) {
     const killer = this.isTwoPlayer ? 'OPPONENT' : 'BOT_ALPHA';
     this.addKillFeedEntry(killer, 'YOU', isHeadshot);
-    this.scoreBot = 1;
-    this.updateHUDScore();
-    this.audio.playRoundLost();
 
-    // Immediate game end!
-    this.triggerMatchVictory('OPPONENT');
+    if (!this.isTwoPlayer) {
+      this.scoreBot++;
+      this.updateHUDScore();
+      this.audio.playRoundLost();
+
+      if (this.scoreBot >= this.maxScore) {
+        this.triggerMatchVictory('OPPONENT');
+      } else {
+        this.lastRoundWinner = 'BOT_ALPHA';
+        this.state = 'ROUND_INTERMISSION';
+        this.stateTimer = 3.0;
+      }
+    }
   }
 
-  // Final Victory / Defeat Screen -> Ends Game & Returns to Lobby
+  // Received from server when a round ends in 2-player match
+  onTwoPlayerRoundOver(msg) {
+    const isMeWinner = (msg.roundWinnerId === this.mpClient?.myId);
+    this.lastRoundWinner = isMeWinner ? 'YOU' : 'OPPONENT';
+
+    this.scorePlayer = msg.scores.blue;
+    this.scoreBot = msg.scores.red;
+    this.updateHUDScore();
+
+    // Kill feed entry
+    const killer = isMeWinner ? 'YOU' : 'OPPONENT';
+    const victim = isMeWinner ? 'OPPONENT' : 'YOU';
+    this.addKillFeedEntry(killer, victim, msg.isHeadshot);
+
+    if (isMeWinner) {
+      this.audio.playRoundWon();
+    } else {
+      this.audio.playRoundLost();
+    }
+
+    // Reset viewmodel ADS
+    if (this.weaponSystem) {
+      this.weaponSystem.setADS(false);
+    }
+    const vig = document.getElementById('damage-vignette');
+    if (vig) vig.style.opacity = '0.0';
+
+    this.state = 'ROUND_INTERMISSION';
+    this.stateTimer = msg.intermissionSeconds || 3.0;
+    this.nextRoundNumber = msg.nextRoundNumber;
+
+    const resText = isMeWinner ? 'ROUND WON!' : 'ROUND LOST!';
+    const resCol = isMeWinner ? '#00ffcc' : '#ff4444';
+    this.updateStateBanner(`${resText} (BLUE ${this.scorePlayer} - RED ${this.scoreBot}) • NEXT ROUND IN 3...`, true, resCol);
+  }
+
+  // Final Victory / Defeat Screen -> Ends Match & Returns to Lobby
   triggerMatchVictory(winner) {
     this.state = 'MATCH_VICTORY';
     this.stateTimer = 3.5;
 
     if (winner === 'PLAYER' || winner === 'YOU') {
-      this.updateStateBanner('VICTORY! YOU WON THE DUEL (+300 COINS)', true, '#f1c40f');
+      this.updateStateBanner(`VICTORY! YOU WON THE DUEL (${this.scorePlayer} - ${this.scoreBot}) (+300 COINS)`, true, '#f1c40f');
       this.caseSystem.addCoins(300);
       this.audio.playUnlockFanfare('legendary');
       this.particles.spawnVictoryConfetti(this.controls.getPosition());
@@ -301,7 +393,7 @@ export class MatchManager {
       this.caseSystem.addCoins(150);
       this.audio.playUnlockFanfare('rare');
     } else {
-      this.updateStateBanner('DEFEAT! OPPONENT WON THE DUEL', true, '#ff4444');
+      this.updateStateBanner(`DEFEAT! OPPONENT WON THE DUEL (${this.scoreBot} - ${this.scorePlayer})`, true, '#ff4444');
       this.audio.playRoundLost();
     }
   }
@@ -381,9 +473,29 @@ export class MatchManager {
       this.stateTimer -= delta;
       const count = Math.max(1, Math.ceil(this.stateTimer));
       const duelLabel = this.isTwoPlayer ? '1v1 PLAYER DUEL' : 'SOLO BOT DUEL';
-      this.updateStateBanner(`${duelLabel} - STARTING IN ${count}...`, true, '#00d2ff');
+      this.updateStateBanner(`${duelLabel} - ROUND ${this.roundNumber} STARTING IN ${count}...`, true, '#00d2ff');
       if (this.stateTimer <= 0) {
         this.startRoundActive();
+      }
+    }
+
+    // Intermission between rounds
+    if (this.state === 'ROUND_INTERMISSION') {
+      this.stateTimer -= delta;
+      const count = Math.max(1, Math.ceil(this.stateTimer));
+      const isMe = (this.lastRoundWinner === 'YOU');
+      const resText = isMe ? 'ROUND WON' : 'ROUND LOST';
+      const resCol = isMe ? '#00ffcc' : '#ff4444';
+      const targetRound = this.isTwoPlayer ? this.nextRoundNumber : (this.roundNumber + 1);
+      this.updateStateBanner(`${resText}! (BLUE ${this.scorePlayer} - RED ${this.scoreBot}) • ROUND ${targetRound} IN ${count}...`, true, resCol);
+
+      if (this.stateTimer <= 0) {
+        if (this.isTwoPlayer) {
+          this.setupNextTwoPlayerRound(this.nextRoundNumber);
+        } else {
+          this.roundNumber++;
+          this.setupRound();
+        }
       }
     }
 
@@ -395,11 +507,12 @@ export class MatchManager {
         timerEl.textContent = `0:${Math.max(0, Math.ceil(this.roundTimeRemaining)).toString().padStart(2, '0')}`;
       }
 
-      // Round timeout (Draw) -> Ends game immediately
+      // Round timeout (Draw) -> Move to next round
       if (this.roundTimeRemaining <= 0) {
-        this.state = 'MATCH_VICTORY';
+        this.state = 'ROUND_INTERMISSION';
         this.stateTimer = 3.0;
-        this.updateStateBanner('TIME EXPIRED - DRAW! RETURNING TO LOBBY...', true, '#ffffff');
+        this.lastRoundWinner = 'DRAW';
+        this.updateStateBanner(`TIME EXPIRED - ROUND DRAW! • NEXT ROUND IN 3...`, true, '#ffffff');
         return;
       }
 
